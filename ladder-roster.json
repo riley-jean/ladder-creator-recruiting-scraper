@@ -1,0 +1,24 @@
+{
+  "roster_creators": [
+    {"name": "Kayla Pickard", "tiktok": "grace.ladder", "instagram": "gracee.ladder", "team": "Define"},
+    {"name": "Julianna Aikens", "tiktok": "juliannafromladder", "instagram": "juliannafromladder", "team": "Define"},
+    {"name": "Dave Hutch", "tiktok": "davefromladder", "instagram": "davefromladder", "team": "Vitality"},
+    {"name": "Melissa Covarrubias", "tiktok": "MelissaFromLadder", "instagram": "MelissaFromLadder", "team": "Ascend"},
+    {"name": "Diana Zardoya", "tiktok": "dianafromladder", "instagram": "dianafromladder", "team": "Ascend"},
+    {"name": "Samia Aziz", "tiktok": "samiafromladder", "instagram": "samiafromladder", "team": "Ascend"},
+    {"name": "Erica Clement-Goudy", "tiktok": "ericafromladder", "instagram": "ericafromladder", "team": "Limitless"},
+    {"name": "Jennifer Estrada", "tiktok": "jenniferfromladder", "instagram": "jenniferfromladder", "team": "Transform"},
+    {"name": "Zion Best", "tiktok": "zionfromladder", "instagram": "zionfromladder", "team": "Limitless"},
+    {"name": "Shawna Roberts", "tiktok": "shawnafromladder", "instagram": "shawnafromladder", "team": "Define"},
+    {"name": "Zoe Carty", "tiktok": "zoefromladder", "instagram": "zoefromladder", "team": "Thrive"},
+    {"name": "Morgan Davis", "tiktok": "morganfromladder", "instagram": "morganfromladder", "team": "Limitless"},
+    {"name": "Michael Heredia", "tiktok": "michaelfromladder", "instagram": "michaelfromladder", "team": "Resilient"},
+    {"name": "Cody Grenier", "tiktok": "codyfromladder", "instagram": "codyfromladder", "team": "Forged"},
+    {"name": "Darlene Sayers", "tiktok": "darlenefromladder", "instagram": "darlenefromladder", "team": "Transform"},
+    {"name": "Charan Singh", "tiktok": "charanfromladder", "instagram": null, "team": "Forged"},
+    {"name": "Kendall Rizzo", "tiktok": "kendallfromladder", "instagram": "kendallfromladder", "team": "Transform"},
+    {"name": "Dillion Collins", "tiktok": "dillonwithladder", "instagram": "dillonwithladder", "team": "Project Alpha"},
+    {"name": "Jared Dulaba", "tiktok": "jaredfromladder", "instagram": "jaredfromladder", "team": "Vantage"},
+    {"name": "Doorly Winegar", "tiktok": "doorlyfromladder", "instagram": "doorlyfromladder", "team": null}
+  ]
+}

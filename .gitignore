@@ -1,0 +1,22 @@
+# secrets
+.env
+*.key
+*.pem
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# generated prospect outputs (contain creator PII — regenerated per run)
+ladder_prospects.json
+ladder_prospects.csv
+prospects.json
+prospects.csv
+
+# bake-off raw dumps (regenerate with compare.py)
+eval/api-comparison/out/
+
+# os
+.DS_Store
