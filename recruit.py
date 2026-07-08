@@ -44,15 +44,19 @@ SLEEP = 0.25
 QUERIES = ["ladder app", "ladder workout", "ladder coach", "ladder fitness"]
 TIKTOK_HASHTAGS = ["ladder", "ladderapp", "ladderworkout", "define", "teamthrive", "limitless", "transform"]
 
-# TODO(Nic): full coach handle/name list — he mentioned @Ladder Coach Spark + others
-# but hasn't sent the complete roster yet. Fill these in once he does; discover()
-# and LADDER_STRONG_PAT already fold them in automatically once populated.
-COACH_HANDLES = []   # e.g. "laddercoachspark"
-COACH_NAMES = []     # e.g. "coach spark"
+# Coach roster pulled from Viral App (2026-07-08 screenshot). Handles are
+# identical across TikTok/IG for every coach so far. "Ladder Coach Spark" was
+# never confirmed as a real handle (not in this list, not found anywhere in
+# the LCP repo) — still open with Nic.
+COACH_NAMES = ["shelby robins", "corey perkins", "nicole winter", "maia henry",
+               "kelly matthews", "jennifer jacobs", "allegra paris", "brian pruett"]
+COACH_HANDLES = ["shelbyrobinss", "perkfitt", "nicolemwinter_", "maiahenryfit",
+                  "kellylmatthews", "jmethod", "allegraparis", "brian_pruett"]
 
 if COACH_NAMES:
     QUERIES += COACH_NAMES
 if COACH_HANDLES:
+    QUERIES += COACH_HANDLES        # catches @handle mentions in captions/bios via keyword search
     TIKTOK_HASHTAGS += COACH_HANDLES
 
 # ---- signals ----
