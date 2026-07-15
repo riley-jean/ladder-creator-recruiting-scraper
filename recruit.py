@@ -41,8 +41,15 @@ MIN_POSTS_IN_WINDOW = 3
 SLEEP = 0.25
 
 # ---- Ladder discovery query set (per Nic's spec, 2026-07-08) ----
-QUERIES = ["ladder app", "ladder workout", "ladder coach", "ladder fitness"]
-TIKTOK_HASHTAGS = ["ladder", "ladderapp", "ladderworkout", "define", "teamthrive", "limitless", "transform"]
+# Widened 2026-07-15 after the first full-batch live run returned only 1
+# qualified prospect out of 32 enriched candidates: that prospect's post
+# tagged "@joinladder" directly, a term the seed set never searched for.
+# Added "joinladder" (the app's actual handle/mention form) plus a couple
+# natural phrasing variants consistent with the existing "ladder <noun>" style.
+QUERIES = ["ladder app", "ladder workout", "ladder coach", "ladder fitness",
+           "joinladder", "ladder training", "ladder gym"]
+TIKTOK_HASHTAGS = ["ladder", "ladderapp", "ladderworkout", "define", "teamthrive", "limitless", "transform",
+                   "joinladder", "laddercoach"]
 
 # Coach roster pulled from Viral App (2026-07-08 screenshot). Handles are
 # identical across TikTok/IG for every coach so far. "Ladder Coach Spark" was
@@ -60,30 +67,45 @@ if COACH_HANDLES:
     TIKTOK_HASHTAGS += COACH_HANDLES
 
 # ---- signals ----
-# Unambiguous Ladder mentions — safe to match on their own.
-LADDER_STRONG_PAT = re.compile(
-    r"(ladder\s?app|ladderapp|#ladderapp\b|#ladderworkout\b|ladder\s?coach|laddercoachspark)", re.I)
+# Truly unambiguous Ladder mentions — no realistic false-positive path.
+LADDER_UNAMBIGUOUS_PAT = re.compile(
+    r"(ladder\s?app|ladderapp|#ladderapp\b|joinladder|ladder\s?coach|laddercoachspark)", re.I)
+# Ambiguous hashtag — added 2026-07-15 after a widened-discovery run qualified
+# @kasciussm, whose "#ladderworkout" tag was about physical agility-ladder
+# footwork drills (a generic training-equipment niche), not the Ladder app.
+# Kept in the qualification gate per Riley's direction (still surfaces the
+# candidate rather than dropping it silently) but flagged low-confidence
+# below since the term alone doesn't reliably mean "Ladder app."
+LADDER_AMBIGUOUS_HASHTAG_PAT = re.compile(r"#ladderworkout\b", re.I)
 # Ladder team/program names — these are also generic English words (e.g. "limitless",
-# "transform"), so on their own they're weak signal. Only trusted combined with
-# FITNESS_PAT below (see LADDER_PAT / _qual).
+# "transform", "resilient"), so on their own they're weak signal. A 2026-07-15 run
+# qualified @marcelletti24 (a baseball-training account) purely because its caption
+# used "resilient" in an ordinary sentence — FITNESS_PAT doesn't actually filter this
+# out since every discovery candidate is fitness content by construction. Kept in the
+# qualification gate per Riley's direction, flagged low-confidence below.
 PROGRAM_NAME_PAT = re.compile(
     r"\b(define|limitless|transform|thrive|resilient|forged|vantage|ascend|vitality)\b|project\s?alpha", re.I)
 # Existing/alumni Ladder creators' handles follow this pattern almost universally
 # (18/20 rows in the July roster export) — used both as an extra dedupe pre-check
 # and as a relevance signal if one slips past the roster/seen-ledger check.
 LADDER_HANDLE_PAT = re.compile(r"(fromladder|withladder)$", re.I)
-# Combined gate used for qualification — either an unambiguous mention, or a
-# program name (still requires FITNESS_PAT to pass _qual).
-LADDER_PAT = re.compile(LADDER_STRONG_PAT.pattern + "|" + PROGRAM_NAME_PAT.pattern, re.I)
+# Combined gate used for qualification — unambiguous mention, ambiguous hashtag,
+# or program name (still requires FITNESS_PAT to pass _qual). Unchanged behavior
+# from before 2026-07-15 — only the confidence split below is new.
+LADDER_PAT = re.compile(LADDER_UNAMBIGUOUS_PAT.pattern + "|" + LADDER_AMBIGUOUS_HASHTAG_PAT.pattern
+                        + "|" + PROGRAM_NAME_PAT.pattern, re.I)
 # Fitness-niche confirmation gate (the "actually fitness" check from Nic's spec).
 FITNESS_PAT = re.compile(
     r"(fitness|work\s?out|\bgym\b|training|trainer|personal\s?coach|\bfit\b|exercise|strength|lifting|cardio|nutrition|health\s?journey)",
     re.I)
 
-# Kept as an extensible mechanism, not populated — Nic didn't ask for competitor
-# exclusion, but this is here in case e.g. Peloton/Whoop-affiliated accounts need
-# to be flagged later.
-COMPETITORS = []
+# Direct fitness-app/program competitors — seeded 2026-07-15 after the first live
+# run surfaced a Beachbody-affiliated account (handle "bodibybeachbody") as a false
+# positive: it only matched because a coach-name keyword search ("jennifer jacobs")
+# happens to also return unrelated content. Substring match against handle+bio+
+# captions catches brand mentions in the handle itself, not just captions.
+COMPETITORS = ["beachbody", "bodi", "peloton", "orangetheory", "f45", "tonal",
+               "future app", "fitbod", "caliber"]
 AFFILIATE_PAT = re.compile(r"(use code|discount|link in bio|% off|sponsored|#ad\b|partner|affiliate|promo code)", re.I)
 
 
@@ -277,8 +299,9 @@ def pick_representative_post(posts, followers):
 def relevance_score(handle, text_lower):
     """Strength of Ladder signal, used as the relevance half of the composite score."""
     if LADDER_HANDLE_PAT.search(handle): return 1.0          # handle itself says fromladder/withladder
-    if LADDER_STRONG_PAT.search(text_lower): return 0.9       # unambiguous app/coach mention
+    if LADDER_UNAMBIGUOUS_PAT.search(text_lower): return 0.9  # unambiguous app/coach mention
     if COACH_NAMES and any(c.lower() in text_lower for c in COACH_NAMES): return 0.85
+    if LADDER_AMBIGUOUS_HASHTAG_PAT.search(text_lower): return 0.5  # #ladderworkout only — could be agility-drill content
     if PROGRAM_NAME_PAT.search(text_lower): return 0.5        # team/program name only — weaker
     return 0.0
 
@@ -291,6 +314,14 @@ def classify(r, posts):
     r["ladder_signal"] = bool(LADDER_PAT.search(text)) or bool(LADDER_HANDLE_PAT.search(h))
     r["fitness_confirmed"] = bool(FITNESS_PAT.search(text))
     r["relevance_score"] = relevance_score(h, text_lower)
+    # Confidence split — added 2026-07-15. "High" = an unambiguous mention or the
+    # handle pattern itself; "Low" = qualified only via the ambiguous #ladderworkout
+    # hashtag and/or a generic program-name word (define/limitless/transform/thrive/
+    # resilient/forged/vantage/ascend/vitality), which real runs showed can false-
+    # positive on unrelated fitness content. Low-confidence prospects still ship —
+    # they're just flagged for manual verification before outreach, not dropped.
+    r["signal_confidence"] = ("high" if (LADDER_UNAMBIGUOUS_PAT.search(text) or LADDER_HANDLE_PAT.search(h))
+                               else "low")
     hits = [c for c in COMPETITORS if c in text_lower]
     if hits:
         r["competitor_flag"] = "COMPETITOR_AFFILIATE:" + ",".join(sorted(set(hits)))
@@ -367,10 +398,12 @@ def run(key, target, out_json, out_csv, fmin=FOLLOWER_MIN, fmax=FOLLOWER_MAX, us
         w = csv.writer(f)
         w.writerow(["Handle","Profile URL","Platform","Followers","Likes","Comments","Shares","Saves",
                     "Video Views","Eng Rate","Caption","Hashtags Used","Post Date","Post URL","Bio",
-                    "Niche Confirmed","Link In Bio","Composite Score","Found Via"])
+                    "Niche Confirmed","Link In Bio","Composite Score","Found Via","Confidence"])
         for r in qualified:
             rep = r.get("representative_post") or {}
             link_in_bio = (r.get("ig_links") or [None])[0]
+            confidence = ("HIGH" if r.get("signal_confidence") == "high"
+                          else "LOW - VERIFY (matched only via #ladderworkout hashtag and/or a generic program-name word)")
             w.writerow([
                 "@"+r["handle"], profile_url(r), r["platform"], r.get("followers"),
                 rep.get("likes"), rep.get("comments"), rep.get("shares"), rep.get("saves"),
@@ -380,7 +413,7 @@ def run(key, target, out_json, out_csv, fmin=FOLLOWER_MIN, fmax=FOLLOWER_MAX, us
                 rep.get("post_date"), rep.get("post_url"),
                 (r.get("bio","") or "").replace("\n"," ")[:200],
                 r.get("fitness_confirmed"), link_in_bio, r.get("composite_score"),
-                "; ".join(r.get("found_via", [])),
+                "; ".join(r.get("found_via", [])), confidence,
             ])
 
     # grow ladder_seen ledger so future runs don't resurface these handles
