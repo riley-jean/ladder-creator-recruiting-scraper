@@ -40,6 +40,11 @@ RECENCY_WEEKS = 4
 MIN_POSTS_IN_WINDOW = 3
 SLEEP = 0.25
 
+# ---- Google Sheet output (append mode) ----
+# Dedicated sourcing-output sheet Riley shared 2026-07-29 — NOT Nic's roster/tracker sheet.
+SHEET_ID = "1XRIeMdRJiq1EeGRfdMEFZy6YVqNMUMPyj6AD6fco7WM"
+SHEET_TAB = "Sourcing Output"
+
 # ---- Ladder discovery query set (per Nic's spec, 2026-07-08) ----
 # Widened 2026-07-15 after the first full-batch live run returned only 1
 # qualified prospect out of 32 enriched candidates: that prospect's post
@@ -344,7 +349,56 @@ def profile_url(r):
 
 
 # ---------------- main run ----------------
-def run(key, target, out_json, out_csv, fmin=FOLLOWER_MIN, fmax=FOLLOWER_MAX, use_ledger=True):
+SHEET_SCOPES = ["https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive"]
+# Your own OAuth client ID (Desktop app), downloaded from the Cloud Console.
+# Each user logs in as themselves on first run; the token is cached locally.
+# gcloud's default client can't be used for Sheets/Drive scopes anymore, and
+# Cousin Labs' org policy blocks service-account key files — so this is the path.
+OAUTH_CLIENT_FILE = os.environ.get("SHEET_OAUTH_CLIENT", "oauth_client.json")
+OAUTH_TOKEN_FILE = "oauth_token.json"
+
+
+def sheet_client(creds_path):
+    """Return an authorized gspread client. Uses a service-account key if one is
+    present (not available under Cousin Labs' policy); otherwise logs in as the
+    current user via our own OAuth client, caching the token for reuse."""
+    import gspread
+    path = creds_path or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if path and os.path.exists(path):
+        from google.oauth2.service_account import Credentials
+        return gspread.authorize(Credentials.from_service_account_file(path, scopes=SHEET_SCOPES))
+    if os.path.exists(OAUTH_CLIENT_FILE):
+        return gspread.oauth(scopes=SHEET_SCOPES,
+                             credentials_filename=OAUTH_CLIENT_FILE,
+                             authorized_user_filename=OAUTH_TOKEN_FILE)
+    raise RuntimeError(
+        f"No Google auth found. Put your OAuth client file at '{OAUTH_CLIENT_FILE}' "
+        "(Cloud Console -> APIs & Services -> Credentials -> Create OAuth client ID "
+        "-> Desktop app -> Download JSON).")
+
+
+def write_to_sheet(header, rows, sheet_id, tab, creds_path):
+    """Append prospect rows to a Google Sheet tab.
+    Writes the header only when the tab is empty, then appends the new rows."""
+    try:
+        import gspread
+    except ImportError:
+        raise RuntimeError("gspread not installed — run: pip install -r requirements.txt")
+    sh = sheet_client(creds_path).open_by_key(sheet_id)
+    try:
+        ws = sh.worksheet(tab)
+    except gspread.WorksheetNotFound:
+        ws = sh.add_worksheet(title=tab, rows=max(len(rows) + 10, 100), cols=len(header))
+    if not ws.get_all_values():
+        ws.append_row(header, value_input_option="USER_ENTERED")
+    if rows:
+        ws.append_rows(rows, value_input_option="USER_ENTERED")
+    return len(rows)
+
+
+def run(key, target, out_json, out_csv, fmin=FOLLOWER_MIN, fmax=FOLLOWER_MAX, use_ledger=True,
+        sheet_id=None, sheet_tab=SHEET_TAB, creds_path=None, write_sheet=True):
     now = dt.datetime.now(dt.timezone.utc).timestamp()
     cutoff = now - RECENCY_WEEKS * 7 * 86400
     seen = load_seen(use_ledger=use_ledger)
@@ -388,33 +442,38 @@ def run(key, target, out_json, out_csv, fmin=FOLLOWER_MIN, fmax=FOLLOWER_MAX, us
     qualified.sort(key=lambda r: -r.get("composite_score", 0.0))
     qualified = qualified[:target]
 
-    # export
-    json.dump({"generated": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d"),
+    # export — build the row set once, reuse for JSON, CSV, and the Google Sheet
+    run_date = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
+    header = ["Run Date","Handle","Profile URL","Platform","Followers","Likes","Comments","Shares","Saves",
+              "Video Views","Eng Rate","Caption","Hashtags Used","Post Date","Post URL","Bio",
+              "Niche Confirmed","Link In Bio","Composite Score","Found Via","Confidence"]
+    rows = []
+    for r in qualified:
+        rep = r.get("representative_post") or {}
+        link_in_bio = (r.get("ig_links") or [None])[0]
+        confidence = ("HIGH" if r.get("signal_confidence") == "high"
+                      else "LOW - VERIFY (matched only via #ladderworkout hashtag and/or a generic program-name word)")
+        rows.append([
+            run_date, "@"+r["handle"], profile_url(r), r["platform"], r.get("followers"),
+            rep.get("likes"), rep.get("comments"), rep.get("shares"), rep.get("saves"),
+            rep.get("views"), r.get("eng_rate"),
+            (rep.get("caption","") or "").replace("\n"," ")[:200],
+            " ".join(rep.get("hashtags", []) or []),
+            rep.get("post_date"), rep.get("post_url"),
+            (r.get("bio","") or "").replace("\n"," ")[:200],
+            r.get("fitness_confirmed"), link_in_bio, r.get("composite_score"),
+            "; ".join(r.get("found_via", [])), confidence,
+        ])
+
+    json.dump({"generated": run_date,
                "target": target, "qualified_count": len(qualified),
                "criteria": {"followers": [fmin, fmax], "min_posts_4wk": MIN_POSTS_IN_WINDOW,
                             "ladder_fitness_only": True, "platforms": ["tiktok", "instagram"]},
                "qualified": qualified}, open(out_json, "w"), indent=2, ensure_ascii=False)
     with open(out_csv, "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["Handle","Profile URL","Platform","Followers","Likes","Comments","Shares","Saves",
-                    "Video Views","Eng Rate","Caption","Hashtags Used","Post Date","Post URL","Bio",
-                    "Niche Confirmed","Link In Bio","Composite Score","Found Via","Confidence"])
-        for r in qualified:
-            rep = r.get("representative_post") or {}
-            link_in_bio = (r.get("ig_links") or [None])[0]
-            confidence = ("HIGH" if r.get("signal_confidence") == "high"
-                          else "LOW - VERIFY (matched only via #ladderworkout hashtag and/or a generic program-name word)")
-            w.writerow([
-                "@"+r["handle"], profile_url(r), r["platform"], r.get("followers"),
-                rep.get("likes"), rep.get("comments"), rep.get("shares"), rep.get("saves"),
-                rep.get("views"), r.get("eng_rate"),
-                (rep.get("caption","") or "").replace("\n"," ")[:200],
-                " ".join(rep.get("hashtags", []) or []),
-                rep.get("post_date"), rep.get("post_url"),
-                (r.get("bio","") or "").replace("\n"," ")[:200],
-                r.get("fitness_confirmed"), link_in_bio, r.get("composite_score"),
-                "; ".join(r.get("found_via", [])), confidence,
-            ])
+        w.writerow(header)
+        w.writerows(rows)
 
     # grow ladder_seen ledger so future runs don't resurface these handles
     try: ledger = set(json.load(open("ladder_seen.json")).get("seen", []))
@@ -423,6 +482,16 @@ def run(key, target, out_json, out_csv, fmin=FOLLOWER_MIN, fmax=FOLLOWER_MAX, us
     json.dump({"seen": sorted(ledger)}, open("ladder_seen.json", "w"))
     print(f"ladder_seen now {len(ledger)} handles", file=sys.stderr)
     print(f"wrote {out_json}, {out_csv}", file=sys.stderr)
+
+    # append the same rows to the Google Sheet; local files are already saved,
+    # so a Sheet/auth failure is a warning, not a run-killer.
+    if write_sheet and sheet_id:
+        try:
+            n = write_to_sheet(header, rows, sheet_id, sheet_tab, creds_path)
+            print(f"appended {n} rows to Google Sheet tab '{sheet_tab}'", file=sys.stderr)
+        except Exception as e:
+            print(f"WARNING: Google Sheet write skipped ({e}); local CSV/JSON still written",
+                  file=sys.stderr)
 
 
 if __name__ == "__main__":
@@ -436,6 +505,11 @@ if __name__ == "__main__":
     r.add_argument("--fmin", type=int, default=FOLLOWER_MIN)
     r.add_argument("--fmax", type=int, default=FOLLOWER_MAX)
     r.add_argument("--no-ledger", action="store_true", help="don't dedup against ladder_seen.json")
+    r.add_argument("--sheet-id", default=SHEET_ID, help="Google Sheet ID to append rows to")
+    r.add_argument("--sheet-tab", default=SHEET_TAB, help="worksheet/tab name (created if missing)")
+    r.add_argument("--creds", default=None, help="path to service account JSON key (or set GOOGLE_APPLICATION_CREDENTIALS)")
+    r.add_argument("--no-sheet", action="store_true", help="skip the Google Sheet write, local files only")
     a = p.parse_args()
     if not a.key: sys.exit("set SCRAPECREATORS_KEY or pass --key")
-    run(a.key, a.target, a.out_json, a.out_csv, fmin=a.fmin, fmax=a.fmax, use_ledger=not a.no_ledger)
+    run(a.key, a.target, a.out_json, a.out_csv, fmin=a.fmin, fmax=a.fmax, use_ledger=not a.no_ledger,
+        sheet_id=a.sheet_id, sheet_tab=a.sheet_tab, creds_path=a.creds, write_sheet=not a.no_sheet)

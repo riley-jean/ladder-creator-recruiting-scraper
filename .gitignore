@@ -2,6 +2,11 @@
 .env
 *.key
 *.pem
+service_account.json
+credentials.json
+*-service-account.json
+oauth_client.json
+oauth_token.json
 
 # python
 __pycache__/
